@@ -27,6 +27,7 @@
 #include "drivers/buf_writer.h"
 #include "drivers/io.h"
 #include "drivers/serial.h"
+#include "drivers/time.h"
 #include "drivers/timer.h"
 #include "drivers/pwm_mapping.h"
 #include "drivers/pwm_output.h"
@@ -74,10 +75,16 @@
 // *** change to adapt Revision
 #define SERIAL_4WAY_VER_MAIN 20
 #define SERIAL_4WAY_VER_SUB_1 (uint8_t) 0
-#define SERIAL_4WAY_VER_SUB_2 (uint8_t) 05
+#define SERIAL_4WAY_VER_SUB_2 (uint8_t) 06
 
-#define SERIAL_4WAY_PROTOCOL_VER 107
+#define SERIAL_4WAY_PROTOCOL_VER 108
 // *** end
+
+// Timeout values for 4-way interface communication (from Betaflight PR #13287)
+#define CMD_TIMEOUT_US  50000
+#define ARG_TIMEOUT_US  25000
+#define DAT_TIMEOUT_US  10000
+#define CRC_TIMEOUT_US  10000
 
 #if (SERIAL_4WAY_VER_MAIN > 24)
 #error "beware of SERIAL_4WAY_VER_SUB_1 is uint8_t"
@@ -328,10 +335,8 @@ uint16_t _crc_xmodem_update (uint16_t crc, uint8_t data) {
 #define ATMEL_DEVICE_MATCH ((pDeviceInfo->words[0] == 0x9307) || (pDeviceInfo->words[0] == 0x930A) || \
         (pDeviceInfo->words[0] == 0x930F) || (pDeviceInfo->words[0] == 0x940B))
 
-#define SILABS_DEVICE_MATCH ((pDeviceInfo->words[0] == 0xF310)||(pDeviceInfo->words[0] == 0xF330) || \
-        (pDeviceInfo->words[0] == 0xF410) || (pDeviceInfo->words[0] == 0xF390) || \
-        (pDeviceInfo->words[0] == 0xF850) || (pDeviceInfo->words[0] == 0xE8B1) || \
-        (pDeviceInfo->words[0] == 0xE8B2))
+// Range-based detection for Bluejay/AM32 compatibility (from Betaflight PR #13287)
+#define SILABS_DEVICE_MATCH ((pDeviceInfo->words[0] > 0xE800) && (pDeviceInfo->words[0] < 0xF900))
 
 // BLHeli_32 MCU ID hi > 0x00 and < 0x90 / lo always = 0x06
 #define ARM_DEVICE_MATCH ((pDeviceInfo->bytes[1] > 0x00) && (pDeviceInfo->bytes[1] < 0x90) && (pDeviceInfo->bytes[0] == 0x06))
@@ -384,19 +389,26 @@ static uint8_t Connect(uint8_32_u *pDeviceInfo)
 
 static serialPort_t *port;
 
-static uint8_t ReadByte(void)
+static bool ReadByte(uint8_t *data, timeDelta_t timeoutUs)
 {
-    // need timeout?
-    while (!serialRxBytesWaiting(port));
-    return serialRead(port);
+    timeUs_t startTime = micros();
+    while (!serialRxBytesWaiting(port)) {
+        if (timeoutUs && (cmpTimeUs(micros(), startTime) > timeoutUs)) {
+            return true;  // timeout occurred
+        }
+    }
+    *data = serialRead(port);
+    return false;  // success
 }
 
 static uint8_16_u CRC_in;
-static uint8_t ReadByteCrc(void)
+static bool ReadByteCrc(uint8_t *data, timeDelta_t timeoutUs)
 {
-    uint8_t b = ReadByte();
-    CRC_in.word = _crc_xmodem_update(CRC_in.word, b);
-    return b;
+    bool timedOut = ReadByte(data, timeoutUs);
+    if (!timedOut) {
+        CRC_in.word = _crc_xmodem_update(CRC_in.word, *data);
+    }
+    return timedOut;
 }
 
 static void WriteByte(uint8_t b)
@@ -437,10 +449,13 @@ void esc4wayProcess(serialPort_t *mspPort)
     bool isExitScheduled = false;
 
     while (1) {
+        bool timedOut = false;
+
         // restart looking for new sequence from host
         do {
             CRC_in.word = 0;
-            ESC = ReadByteCrc();
+            // No timeout - BLHeliSuite32 waits indefinitely for input
+            ReadByteCrc(&ESC, 0);
         } while (ESC != cmd_Local_Escape);
 
         RX_LED_ON;
@@ -448,23 +463,25 @@ void esc4wayProcess(serialPort_t *mspPort)
         Dummy.word = 0;
         O_PARAM = &Dummy.bytes[0];
         O_PARAM_LEN = 1;
-        CMD = ReadByteCrc();
-        ioMem.D_FLASH_ADDR_H = ReadByteCrc();
-        ioMem.D_FLASH_ADDR_L = ReadByteCrc();
-        I_PARAM_LEN = ReadByteCrc();
 
-        InBuff = ParamBuf;
-        uint8_t i = I_PARAM_LEN;
-        do {
-          *InBuff = ReadByteCrc();
-          InBuff++;
-          i--;
-        } while (i != 0);
+        timedOut = ReadByteCrc(&CMD, CMD_TIMEOUT_US) ||
+                   ReadByteCrc(&ioMem.D_FLASH_ADDR_H, ARG_TIMEOUT_US) ||
+                   ReadByteCrc(&ioMem.D_FLASH_ADDR_L, ARG_TIMEOUT_US) ||
+                   ReadByteCrc(&I_PARAM_LEN, ARG_TIMEOUT_US);
 
-        CRC_check.bytes[1] = ReadByte();
-        CRC_check.bytes[0] = ReadByte();
+        if (!timedOut) {
+            uint8_t i = I_PARAM_LEN;
+            InBuff = ParamBuf;
+            do {
+                timedOut = ReadByteCrc(InBuff++, DAT_TIMEOUT_US);
+            } while ((--i > 0) && !timedOut);
 
-        if (CRC_check.word == CRC_in.word) {
+            for (int8_t j = 1; (j >= 0) && !timedOut; j--) {
+                timedOut = ReadByte(&CRC_check.bytes[j], CRC_TIMEOUT_US);
+            }
+        }
+
+        if ((CRC_check.word == CRC_in.word) && !timedOut) {
             ACK_OUT = ACK_OK;
         } else {
             ACK_OUT = ACK_I_INVALID_CRC;
@@ -561,9 +578,13 @@ void esc4wayProcess(serialPort_t *mspPort)
 
                 case cmd_DeviceReset:
                 {
+                    bool rebootEsc = false;
                     if (ParamBuf[0] < escCount) {
                         // Channel may change here
                         selected_esc = ParamBuf[0];
+                        if (ioMem.D_FLASH_ADDR_L == 1) {
+                            rebootEsc = true;
+                        }
                     }
                     else {
                         ACK_OUT = ACK_I_INVALID_CHANNEL;
@@ -577,6 +598,15 @@ void esc4wayProcess(serialPort_t *mspPort)
                         case imARM_BLB:
                         {
                             BL_SendCMDRunRestartBootloader(&DeviceInfo);
+                            // ESC reboot logic for Bluejay/AM32 (from Betaflight PR #14214)
+                            if (rebootEsc) {
+                                ESC_OUTPUT;
+                                setEscLo(selected_esc);
+                                timeMs_t m = millis();
+                                while (millis() - m < 300);
+                                setEscHi(selected_esc);
+                                ESC_INPUT;
+                            }
                             break;
                         }
                         #endif
@@ -872,7 +902,7 @@ void esc4wayProcess(serialPort_t *mspPort)
         WriteByteCrc(ioMem.D_FLASH_ADDR_L);
         WriteByteCrc(O_PARAM_LEN);
 
-        i=O_PARAM_LEN;
+        uint8_t i = O_PARAM_LEN;
         do {
             while (!serialTxBytesFree(port));
 
