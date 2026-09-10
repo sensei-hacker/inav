@@ -33,6 +33,7 @@
 #include "drivers/pwm_output.h"
 #include "drivers/light_led.h"
 #include "drivers/system.h"
+#include "build/debug.h"
 
 #include "flight/mixer.h"
 
@@ -352,16 +353,21 @@ static uint8_t Connect(uint8_32_u *pDeviceInfo)
             return 1;
         } else {
             if (BL_ConnectEx(pDeviceInfo)) {
+                DEBUG_SET(DEBUG_ESC, 0, pDeviceInfo->words[0]);
                 if  SILABS_DEVICE_MATCH {
                     CurrentInterfaceMode = imSIL_BLB;
+                    DEBUG_SET(DEBUG_ESC, 1, 1);
                     return 1;
                 } else if ATMEL_DEVICE_MATCH {
                     CurrentInterfaceMode = imATM_BLB;
+                    DEBUG_SET(DEBUG_ESC, 1, 2);
                     return 1;
                 } else if ARM_DEVICE_MATCH {
                     CurrentInterfaceMode = imARM_BLB;
+                    DEBUG_SET(DEBUG_ESC, 1, 3);
                     return 1;
                 }
+                DEBUG_SET(DEBUG_ESC, 1, 0);
             }
         }
         #elif defined(USE_SERIAL_4WAY_BLHELI_BOOTLOADER)
