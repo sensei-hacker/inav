@@ -898,7 +898,7 @@ void esc4wayProcess(serialPort_t *mspPort)
         WriteByteCrc(ioMem.D_FLASH_ADDR_L);
         WriteByteCrc(O_PARAM_LEN);
 
-        uint8_t i = O_PARAM_LEN;
+        i = O_PARAM_LEN;
         do {
             while (!serialTxBytesFree(port));
 
