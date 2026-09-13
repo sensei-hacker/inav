@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "platform.h"
+#include "build/debug.h"
 
 #ifdef  USE_SERIAL_4WAY_BLHELI_INTERFACE
 
@@ -33,7 +34,6 @@
 #include "drivers/pwm_output.h"
 #include "drivers/light_led.h"
 #include "drivers/system.h"
-#include "build/debug.h"
 
 #include "flight/mixer.h"
 
@@ -80,12 +80,6 @@
 
 #define SERIAL_4WAY_PROTOCOL_VER 108
 // *** end
-
-// Timeout values for 4-way interface communication (from Betaflight PR #13287)
-#define CMD_TIMEOUT_US  50000
-#define ARG_TIMEOUT_US  25000
-#define DAT_TIMEOUT_US  10000
-#define CRC_TIMEOUT_US  10000
 
 #if (SERIAL_4WAY_VER_MAIN > 24)
 #error "beware of SERIAL_4WAY_VER_SUB_1 is uint8_t"
@@ -336,7 +330,7 @@ uint16_t _crc_xmodem_update (uint16_t crc, uint8_t data) {
 #define ATMEL_DEVICE_MATCH ((pDeviceInfo->words[0] == 0x9307) || (pDeviceInfo->words[0] == 0x930A) || \
         (pDeviceInfo->words[0] == 0x930F) || (pDeviceInfo->words[0] == 0x940B))
 
-// Range-based detection for Bluejay/AM32 compatibility (from Betaflight PR #13287)
+// Range-based detection for newer SiLabs BLHeli_S MCUs (EFM8BB51x reports 0xE8B5)
 #define SILABS_DEVICE_MATCH ((pDeviceInfo->words[0] > 0xE800) && (pDeviceInfo->words[0] < 0xF900))
 
 // BLHeli_32 MCU ID hi > 0x00 and < 0x90 / lo always = 0x06
@@ -346,25 +340,32 @@ static uint8_t CurrentInterfaceMode;
 
 static uint8_t Connect(uint8_32_u *pDeviceInfo)
 {
+    // DEBUG_ESC: [0] = raw bootloader signature (words[0]), [1] = interface mode
+    // (imSIL_BLB=1 SiLabs/BLHeli_S-Bluejay, imATM_BLB=2 Atmel, imSK=3 SimonK, imARM_BLB=4 ARM/BLHeli32-AM32).
+    DEBUG_SET(DEBUG_ESC, 0, 0);
+    DEBUG_SET(DEBUG_ESC, 1, 0);
+
     for (uint8_t I = 0; I < 3; ++I) {
         #if (defined(USE_SERIAL_4WAY_BLHELI_BOOTLOADER) && defined(USE_SERIAL_4WAY_SK_BOOTLOADER))
         if ((CurrentInterfaceMode != imARM_BLB) && Stk_ConnectEx(pDeviceInfo) && ATMEL_DEVICE_MATCH) {
             CurrentInterfaceMode = imSK;
+            DEBUG_SET(DEBUG_ESC, 0, pDeviceInfo->words[0]);
+            DEBUG_SET(DEBUG_ESC, 1, imSK);
             return 1;
         } else {
             if (BL_ConnectEx(pDeviceInfo)) {
                 DEBUG_SET(DEBUG_ESC, 0, pDeviceInfo->words[0]);
                 if  SILABS_DEVICE_MATCH {
                     CurrentInterfaceMode = imSIL_BLB;
-                    DEBUG_SET(DEBUG_ESC, 1, 1);
+                    DEBUG_SET(DEBUG_ESC, 1, imSIL_BLB);
                     return 1;
                 } else if ATMEL_DEVICE_MATCH {
                     CurrentInterfaceMode = imATM_BLB;
-                    DEBUG_SET(DEBUG_ESC, 1, 2);
+                    DEBUG_SET(DEBUG_ESC, 1, imATM_BLB);
                     return 1;
                 } else if ARM_DEVICE_MATCH {
                     CurrentInterfaceMode = imARM_BLB;
-                    DEBUG_SET(DEBUG_ESC, 1, 3);
+                    DEBUG_SET(DEBUG_ESC, 1, imARM_BLB);
                     return 1;
                 }
                 DEBUG_SET(DEBUG_ESC, 1, 0);
@@ -395,26 +396,19 @@ static uint8_t Connect(uint8_32_u *pDeviceInfo)
 
 static serialPort_t *port;
 
-static bool ReadByte(uint8_t *data, timeDelta_t timeoutUs)
+static uint8_t ReadByte(void)
 {
-    timeUs_t startTime = micros();
-    while (!serialRxBytesWaiting(port)) {
-        if (timeoutUs && (cmpTimeUs(micros(), startTime) > timeoutUs)) {
-            return true;  // timeout occurred
-        }
-    }
-    *data = serialRead(port);
-    return false;  // success
+    // need timeout?
+    while (!serialRxBytesWaiting(port));
+    return serialRead(port);
 }
 
 static uint8_16_u CRC_in;
-static bool ReadByteCrc(uint8_t *data, timeDelta_t timeoutUs)
+static uint8_t ReadByteCrc(void)
 {
-    bool timedOut = ReadByte(data, timeoutUs);
-    if (!timedOut) {
-        CRC_in.word = _crc_xmodem_update(CRC_in.word, *data);
-    }
-    return timedOut;
+    uint8_t b = ReadByte();
+    CRC_in.word = _crc_xmodem_update(CRC_in.word, b);
+    return b;
 }
 
 static void WriteByte(uint8_t b)
@@ -455,13 +449,10 @@ void esc4wayProcess(serialPort_t *mspPort)
     bool isExitScheduled = false;
 
     while (1) {
-        bool timedOut = false;
-
         // restart looking for new sequence from host
         do {
             CRC_in.word = 0;
-            // No timeout - BLHeliSuite32 waits indefinitely for input
-            ReadByteCrc(&ESC, 0);
+            ESC = ReadByteCrc();
         } while (ESC != cmd_Local_Escape);
 
         RX_LED_ON;
@@ -469,25 +460,23 @@ void esc4wayProcess(serialPort_t *mspPort)
         Dummy.word = 0;
         O_PARAM = &Dummy.bytes[0];
         O_PARAM_LEN = 1;
+        CMD = ReadByteCrc();
+        ioMem.D_FLASH_ADDR_H = ReadByteCrc();
+        ioMem.D_FLASH_ADDR_L = ReadByteCrc();
+        I_PARAM_LEN = ReadByteCrc();
 
-        timedOut = ReadByteCrc(&CMD, CMD_TIMEOUT_US) ||
-                   ReadByteCrc(&ioMem.D_FLASH_ADDR_H, ARG_TIMEOUT_US) ||
-                   ReadByteCrc(&ioMem.D_FLASH_ADDR_L, ARG_TIMEOUT_US) ||
-                   ReadByteCrc(&I_PARAM_LEN, ARG_TIMEOUT_US);
+        InBuff = ParamBuf;
+        uint8_t i = I_PARAM_LEN;
+        do {
+            *InBuff = ReadByteCrc();
+            InBuff++;
+            i--;
+        } while (i != 0);
 
-        if (!timedOut) {
-            uint8_t i = I_PARAM_LEN;
-            InBuff = ParamBuf;
-            do {
-                timedOut = ReadByteCrc(InBuff++, DAT_TIMEOUT_US);
-            } while ((--i > 0) && !timedOut);
+        CRC_check.bytes[1] = ReadByte();
+        CRC_check.bytes[0] = ReadByte();
 
-            for (int8_t j = 1; (j >= 0) && !timedOut; j--) {
-                timedOut = ReadByte(&CRC_check.bytes[j], CRC_TIMEOUT_US);
-            }
-        }
-
-        if ((CRC_check.word == CRC_in.word) && !timedOut) {
+        if (CRC_check.word == CRC_in.word) {
             ACK_OUT = ACK_OK;
         } else {
             ACK_OUT = ACK_I_INVALID_CRC;
@@ -604,7 +593,8 @@ void esc4wayProcess(serialPort_t *mspPort)
                         case imARM_BLB:
                         {
                             BL_SendCMDRunRestartBootloader(&DeviceInfo);
-                            // ESC reboot logic for Bluejay/AM32 (from Betaflight PR #14214)
+                            // Bluejay/AM32 ESCs enter their bootloader after the signal line is
+                            // pulled low briefly and released.
                             if (rebootEsc) {
                                 ESC_OUTPUT;
                                 setEscLo(selected_esc);
