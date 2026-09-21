@@ -282,10 +282,12 @@ static const adjustmentConfig_t defaultAdjustmentConfigs[ADJUSTMENT_FUNCTION_COU
         .adjustmentFunction = ADJUSTMENT_VTX_POWER_LEVEL,
         .mode = ADJUSTMENT_MODE_STEP,
         .data = { .stepConfig = { .step = 1 }}
+#ifdef USE_MZTC
     }, {
         .adjustmentFunction = ADJUSTMENT_MZTC_ZOOM,
         .mode = ADJUSTMENT_MODE_STEP,
         .data = { .stepConfig = { .step = 1 }}
+#endif
     }, {
         .adjustmentFunction = ADJUSTMENT_TPA,
         .mode = ADJUSTMENT_MODE_STEP,

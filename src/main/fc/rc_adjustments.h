@@ -86,7 +86,9 @@ typedef enum {
     ADJUSTMENT_FW_LEVEL_TRIM                    = 58,
     ADJUSTMENT_NAV_WP_MULTI_MISSION_INDEX       = 59,
     ADJUSTMENT_NAV_FW_ALT_CONTROL_RESPONSE      = 60,
+#ifdef USE_MZTC
     ADJUSTMENT_MZTC_ZOOM                        = 61,
+#endif
     ADJUSTMENT_FUNCTION_COUNT // must be last
 } adjustmentFunction_e;
 

@@ -124,7 +124,9 @@ static const box_t boxes[CHECKBOX_ITEM_COUNT + 1] = {
     { .boxId = BOXTERRAINAGLHOLD,   .boxName = "TERRAIN AGL HOLD",  .permanentId = 70 },
     { .boxId = BOXINFLIGHTMENU,     .boxName = "IN FLIGHT MENU",    .permanentId = 71 },
     { .boxId = BOXTHRUSTREVERSE,    .boxName = "THRUST REVERSE",    .permanentId = 72 },
+#ifdef USE_MZTC
     { .boxId = BOXMZTCCALIBRATE,    .boxName = "THERMAL CALIBRATE", .permanentId = 73 },
+#endif
     { .boxId = CHECKBOX_ITEM_COUNT, .boxName = NULL,                .permanentId = 0xFF }
 };
 
