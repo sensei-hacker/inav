@@ -54,16 +54,16 @@ GND (video)             ->  VTX GND
 
 ## Serial port setup
 
-Assign the `MZTC` function to the UART the camera is wired to. Then tell the driver which port to use. The port index in `mztc_port` is the same zero-based index the CLI `serial` command uses. UART1 is 0, UART2 is 1, and so on.
+Assign the `MassZero Thermal Camera` function to the UART the camera is wired to. That is the only assignment the driver needs. The `mztc_enabled`, `mztc_port` and `mztc_baudrate` settings were removed. Nothing has to be kept in step with the Ports tab any more.
+
+Set the **Peripherals** baud column on that same row to 115200. MassZero cameras ship at that rate. The driver reads the peripheral baud rate, so a rate set in the Data or the Telemetry column leaves the camera silent.
+
+From the CLI the same thing looks like this for UART2:
 
 ```
-set mztc_enabled = ON
-set mztc_port = 1
-set mztc_baudrate = 8
+serial 1 268435456 115200 115200 115200 115200
 save
 ```
-
-`mztc_baudrate` is an index into INAV's baud rate table. Index 8 is 115200. MassZero cameras ship at that rate.
 
 ## How the link is established
 
@@ -224,6 +224,20 @@ Assign it like any other adjustment, described in
 
 The adjustment writes the camera and the stored setting together. The switch position and the saved zoom level therefore still agree after a reconnect.
 
+### MZTC_PALETTE
+
+An in-flight adjustment that steps through the fourteen palettes in the order
+`mztc_palette_mode` lists them, from `WHITE_HOT` to `RED_HOT`. It is function
+62. Assign it the same way as any other adjustment.
+
+A three position switch steps one palette per flick. A pot or a slider walks
+the whole list. The step stops at each end rather than wrapping, so the camera
+never jumps from the last palette back to the first under a pilot's thumb.
+
+Like zoom, the adjustment writes the camera and the stored setting together.
+A preset applied later still overrides the palette. Choosing a preset is a
+deliberate act.
+
 ### What is deliberately not on a switch
 
 `mztc_vignetting` stays a CLI command. Vignetting correction has no protective
@@ -313,12 +327,11 @@ spot reading, no maximum in frame and no threshold alarm. A preset tunes the ima
 
 `mztc` shows `Connected: NO` and the error flags include 0x01 or 0x10.
 
-1. Confirm `mztc_enabled` is `ON` and `mztc_port` names the UART the camera is on.
-2. Confirm the `MZTC` serial function is assigned to that UART.
-3. Confirm `mztc_baudrate` is 8, unless the camera has been reconfigured away from 115200.
-4. Check that TX and RX are crossed.
-5. Check the supply voltage against the camera's datasheet.
-6. Run `mztc_reconnect` after each change.
+1. Confirm the `MassZero Thermal Camera` function is assigned to the UART the camera is on.
+2. Confirm the **Peripherals** baud column on that row reads 115200. That is the column the driver reads.
+3. Check that TX and RX are crossed.
+4. Check the supply voltage against the camera's datasheet.
+5. Run `mztc_reconnect` after each change.
 
 ### The camera connects and then drops out
 

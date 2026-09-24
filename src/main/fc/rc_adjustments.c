@@ -283,10 +283,6 @@ static const adjustmentConfig_t defaultAdjustmentConfigs[ADJUSTMENT_FUNCTION_COU
         .mode = ADJUSTMENT_MODE_STEP,
         .data = { .stepConfig = { .step = 1 }}
     }, {
-        .adjustmentFunction = ADJUSTMENT_MZTC_ZOOM,
-        .mode = ADJUSTMENT_MODE_STEP,
-        .data = { .stepConfig = { .step = 1 }}
-    }, {
         .adjustmentFunction = ADJUSTMENT_TPA,
         .mode = ADJUSTMENT_MODE_STEP,
         .data = { .stepConfig = { .step = 1 }}
@@ -314,6 +310,16 @@ static const adjustmentConfig_t defaultAdjustmentConfigs[ADJUSTMENT_FUNCTION_COU
         .adjustmentFunction = ADJUSTMENT_NAV_FW_ALT_CONTROL_RESPONSE,
         .mode = ADJUSTMENT_MODE_STEP,
         .data = { .stepConfig = { .step = 1 }}
+#ifdef USE_MZTC
+    }, {
+        .adjustmentFunction = ADJUSTMENT_MZTC_ZOOM,
+        .mode = ADJUSTMENT_MODE_STEP,
+        .data = { .stepConfig = { .step = 1 }}
+    }, {
+        .adjustmentFunction = ADJUSTMENT_MZTC_PALETTE,
+        .mode = ADJUSTMENT_MODE_STEP,
+        .data = { .stepConfig = { .step = 1 }}
+#endif
     }
 };
 
@@ -611,6 +617,18 @@ static void applyStepAdjustment(controlConfig_t *controlConfig, uint8_t adjustme
                 const int wanted = constrain(current + delta, MZTC_ZOOM_1X, MZTC_ZOOM_8X);
                 if (wanted != current && mztcSetZoom((mztcZoomLevel_e)wanted)) {
                     blackboxLogInflightAdjustmentEvent(ADJUSTMENT_MZTC_ZOOM, wanted);
+                }
+            }
+            break;
+        case ADJUSTMENT_MZTC_PALETTE:
+            {
+                // Step through the fourteen palettes. mztcSetPalette writes the
+                // camera and stores the choice together, so the switch position
+                // and the saved setting still agree after a reconnect.
+                const int current = mztcConfig()->palette_mode;
+                const int wanted = constrain(current + delta, MZTC_PALETTE_WHITE_HOT, MZTC_PALETTE_RED_HOT);
+                if (wanted != current && mztcSetPalette((mztcPaletteMode_e)wanted)) {
+                    blackboxLogInflightAdjustmentEvent(ADJUSTMENT_MZTC_PALETTE, wanted);
                 }
             }
             break;

@@ -163,6 +163,7 @@ this reason ensure that you define enough ranges to cover the range channel's us
 | 59    | NAV_WP_MULTI_MISSION_INDEX |
 | 60    | NAV_FW_ALT_CONTROL_RESPONSE |
 | 61    | MZTC_ZOOM |
+| 62    | MZTC_PALETTE |
 
 ## Examples
 
