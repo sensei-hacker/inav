@@ -224,6 +224,20 @@ Assign it like any other adjustment, described in
 
 The adjustment writes the camera and the stored setting together. The switch position and the saved zoom level therefore still agree after a reconnect.
 
+### MZTC_PALETTE
+
+An in-flight adjustment that steps through the fourteen palettes in the order
+`mztc_palette_mode` lists them, from `WHITE_HOT` to `RED_HOT`. It is function
+62. Assign it the same way as any other adjustment.
+
+A three position switch steps one palette per flick. A pot or a slider walks
+the whole list. The step stops at each end rather than wrapping, so the camera
+never jumps from the last palette back to the first under a pilot's thumb.
+
+Like zoom, the adjustment writes the camera and the stored setting together.
+A preset applied later still overrides the palette. Choosing a preset is a
+deliberate act.
+
 ### What is deliberately not on a switch
 
 `mztc_vignetting` stays a CLI command. Vignetting correction has no protective
