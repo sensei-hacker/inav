@@ -716,9 +716,10 @@ static void updateFwEnergyBankGuard(timeUs_t currentTimeUs, uint16_t autoThrottl
     // Control-authority signal (prototype): near/at stall the elevator stops producing pitch, so
     // this error (demand vs actual nose-up) opens up and stays large — a definitive "stalled"
     // signal that needs no airspeed. Buffeting (the incipient precursor) is hardware-only and not
-    // reproduced by rigid-body SITL; TODO detect it from high-pass accel/gyro energy. Note
-    // attitude.values.pitch is +ve = pitch-down, so a sum yields demand - actual (nose-up +ve).
-    const int16_t pitchAuthorityError = posControl.rcAdjustment[PITCH] + attitude.values.pitch;
+    // reproduced by rigid-body SITL; TODO detect it from high-pass accel/gyro energy.
+    // Sign: rcAdjustment[PITCH] is +ve = climb/nose-up, but attitude.values.pitch is +ve =
+    // pitch-down (imu.h), so negate the attitude to make both nose-up positive before subtracting.
+    const int16_t pitchAuthorityError = posControl.rcAdjustment[PITCH] - (-attitude.values.pitch);
     DEBUG_SET(DEBUG_FW_TURN, 2, pitchAuthorityError);   // pitch demand vs actual attitude [decideg]
 }
 
